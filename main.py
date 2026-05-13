@@ -1,5 +1,6 @@
-# ================= Witanime API - ScraperAPI Version =================
+# ================= Witanime API - ScraperAPI Version (تصحيح الخطأ) =================
 import requests
+import json
 import re
 import base64
 import urllib.parse
@@ -8,37 +9,29 @@ import time
 from fastapi import FastAPI, Query, HTTPException
 from bs4 import BeautifulSoup
 
-app = FastAPI(title="Witanime API", description="API لاستخراج بيانات الأنمي عبر ScraperAPI", version="1.4")
+app = FastAPI(title="Witanime API", description="API لاستخراج بيانات الأنمي عبر ScraperAPI", version="1.5")
 
 website = "https://witanime.you/"
-API_KEY = "bf565c4a886c08ff401e4999d76e451c"  # مفتاح ScraperAPI
+API_KEY = "bf565c4a886c08ff401e4999d76e451c"  # يفضل استخدام متغير بيئة
 SCRAPERAPI_URL = "https://api.scraperapi.com/"
 
 def scraperapi_get(target_url: str, retries: int = 3):
-    """
-    إرسال طلب عبر ScraperAPI وإعادة المحتوى (نص) مع إعادة محاولة تلقائية.
-    """
     for attempt in range(retries):
         try:
-            params = {
-                'api_key': API_KEY,
-                'url': target_url,
-                # يمكن إضافة 'render' => 'true' إذا كان الموقع يستخدم JS لكن ليس مطلوباً هنا
-            }
+            params = {'api_key': API_KEY, 'url': target_url}
             response = requests.get(SCRAPERAPI_URL, params=params, timeout=30)
             response.raise_for_status()
             return response.text
         except Exception as e:
             if attempt == retries - 1:
-                raise Exception(f"فشل بعد {retries} محاولات عبر ScraperAPI: {e}")
-            time.sleep(2 ** attempt)  # تأخير تصاعدي
+                raise Exception(f"فشل بعد {retries} محاولات: {e}")
+            time.sleep(2 ** attempt)
 
-# ------------------- Helper Functions -------------------
 def get_post_id(url: str):
     try:
         html = scraperapi_get(url)
         shortlink = BeautifulSoup(html, "html.parser").find("link", rel="shortlink")
-        if shortlink and "href" in shortlink.attrs:
+        if shortlink and shortlink.get("href"):
             match = re.search(r"p=(\d+)", shortlink["href"])
             if match:
                 return match.group(1)
@@ -51,11 +44,8 @@ def get_episode_data(post_id: str):
         return {"error": "لم يتم العثور على الـ ID أو الرابط غير صالح."}
     try:
         api_url = f"https://witanime.you/wp-json/custom-api/blue/ldo/frum/chd/not/loaded/v1/episode/{post_id}"
-        json_text = scraperapi_get(api_url)
-        data = requests.json() if isinstance(json_text, str) else json_text  # تأكد من التحويل
-        # لكن scraperapi_get يعيد نص، نحتاج إلى تحميل JSON
-        import json
-        data = json.loads(json_text)
+        text_response = scraperapi_get(api_url)
+        data = json.loads(text_response)  # تصحيح الخطأ هنا
         meta = data.get("meta", {})
         return {
             "anime_name": data.get("taxonomy", {}).get("anime", ["غير متوفر"])[0],
@@ -73,25 +63,25 @@ def get_episode_data(post_id: str):
     except Exception as e:
         return {"error": f"خطأ أثناء جلب البيانات: {str(e)}"}
 
-# ------------------- API Endpoints -------------------
+# ------------------- نهايات API -------------------
 @app.get("/")
 def root():
     return {
-        "message": "مرحباً بك في Witanime API (عبر ScraperAPI)",
+        "message": "مرحباً بك في Witanime API (عبر ScraperAPI - نسخة مصححة)",
         "endpoints": {
-            "/episode-info": "GET?url=... - معلومات حلقة معينة",
-            "/episodes": "GET?page=1 - قائمة الحلقات من الأرشيف",
-            "/search": "GET?q=اسم_الانمي&page=1 - البحث عن أنمي",
-            "/anime": "GET?url=... - تفاصيل الأنمي (باستخدام RSS)",
-            "/anime-episodes": "GET?url=... - استخراج الحلقات من صفحة الأنمي (Base64)"
+            "/episode-info": "GET?url=... - معلومات حلقة",
+            "/episodes": "GET?page=1 - آخر الحلقات",
+            "/search": "GET?q=... - بحث",
+            "/anime": "GET?url=... - تفاصيل أنمي",
+            "/anime-episodes": "GET?url=... - فك base64"
         }
     }
 
 @app.get("/episode-info")
-def episode_info(url: str = Query(..., description="رابط الحلقة")):
+def episode_info(url: str = Query(...)):
     post_id = get_post_id(url)
     if not post_id:
-        raise HTTPException(status_code=404, detail="لم يتم العثور على معرف الحلقة")
+        raise HTTPException(404, "لم يتم العثور على معرف الحلقة")
     return get_episode_data(post_id)
 
 @app.get("/episodes")
@@ -104,11 +94,11 @@ def episodes(page: int = Query(1, ge=1)):
         images = soup.select('.anime-card-poster img')
         result = [
             {"name": a.text.strip(), "url": a['href'], "image": img['src']}
-            for a, img in zip(titles, images)
+            for a, img in zip(titles, images) if a and img
         ]
         return {"page": page, "episodes": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 @app.get("/search")
 def search_anime(q: str = Query(...), page: int = Query(1, ge=1)):
@@ -123,11 +113,11 @@ def search_anime(q: str = Query(...), page: int = Query(1, ge=1)):
         images = soup.select('.anime-card-poster img')
         results = [
             {"name": a.text.strip(), "url": a['href'], "image": img['src']}
-            for a, img in zip(titles, images)
+            for a, img in zip(titles, images) if a and img
         ]
         return {"query": q, "page": page, "results": results}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 @app.get("/anime")
 def anime_details(url: str = Query(...)):
@@ -142,14 +132,12 @@ def anime_details(url: str = Query(...)):
             rss_ok = False
 
         info = {}
-        info_divs = soup.find_all('div', class_='anime-info')
-        for div in info_divs:
+        for div in soup.find_all('div', class_='anime-info'):
             span = div.find('span')
             if span:
                 key = span.text.strip(':')
                 value = div.text.replace(span.text, '').strip()
                 info[key] = value
-
         story_tag = soup.find('p', class_='anime-story')
         if story_tag:
             info['story'] = story_tag.text.strip()
@@ -170,7 +158,7 @@ def anime_details(url: str = Query(...)):
 
         return {"title": title, "image": image, "info": info, "episodes": episodes}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 @app.get("/anime-episodes")
 def anime_episodes_base64(url: str = Query(...)):
@@ -182,11 +170,11 @@ def anime_episodes_base64(url: str = Query(...)):
             try:
                 decoded_url = urllib.parse.unquote(base64.b64decode(encoded).decode())
                 episodes.append({"title": title.strip(), "url": decoded_url})
-            except Exception:
+            except:
                 episodes.append({"title": title.strip(), "url": "فك التشفير فشل"})
         return {"episodes": episodes}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 if __name__ == "__main__":
     import uvicorn
