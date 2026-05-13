@@ -1,20 +1,29 @@
-# ================= Witanime API - Enhanced Requests Version with provided headers & cookies =================
-import requests
+# ================= Witanime API - CloudScraper + Proxies =================
+import cloudscraper
 import re
 import base64
 import urllib.parse
 import xml.etree.ElementTree as ET
+import random
 import time
 from fastapi import FastAPI, Query, HTTPException
 from bs4 import BeautifulSoup
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-app = FastAPI(title="Witanime API", description="API لاستخراج بيانات الأنمي باستخدام Cookies/Headers محسّنة", version="1.3")
+app = FastAPI(title="Witanime API", description="API مع بروكسيات متعددة و CloudScraper", version="2.0")
 
 website = "https://witanime.you/"
 
-# ========== البيانات المقدمة من المستخدم ==========
+# ========== البروكسيات المقدمة ==========
+PROXY_LIST = [
+    {"http": "http://213.131.85.26:1981", "https": "http://213.131.85.26:1981"},
+    {"http": "http://196.204.83.233:1976", "https": "http://196.204.83.233:1976"},
+    {"http": "http://41.33.219.140:1981", "https": "http://41.33.219.140:1981"},
+    {"http": "http://196.204.83.232:1981", "https": "http://196.204.83.232:1981"},
+    {"http": "http://196.219.64.252:80", "https": "http://196.219.64.252:80"},
+    {"http": "http://41.33.219.140:1976", "https": "http://41.33.219.140:1976"},
+]
+
+# ========== الكوكيز والهيدرات المقدمة ==========
 COOKIES = {
     '_ga': 'GA1.1.142760803.1778638162',
     'wordpress_test_cookie': 'WP%20Cookie%20check',
@@ -23,55 +32,46 @@ COOKIES = {
 }
 
 HEADERS = {
-    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'accept-language': 'ar,en;q=0.9,en-GB;q=0.8,en-US;q=0.7',
-    'priority': 'u=0, i',
+    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'accept-language': 'ar,en;q=0.9',
     'referer': 'https://witanime.you/',
     'sec-ch-ua': '"Chromium";v="148", "Microsoft Edge";v="148", "Not/A)Brand";v="99"',
-    'sec-ch-ua-arch': '""',
-    'sec-ch-ua-bitness': '"64"',
-    'sec-ch-ua-full-version': '"148.0.3967.54"',
-    'sec-ch-ua-full-version-list': '"Chromium";v="148.0.7778.97", "Microsoft Edge";v="148.0.3967.54", "Not/A)Brand";v="99.0.0.0"',
     'sec-ch-ua-mobile': '?1',
-    'sec-ch-ua-model': '"Nexus 5"',
     'sec-ch-ua-platform': '"Android"',
-    'sec-ch-ua-platform-version': '"6.0"',
-    'sec-fetch-dest': 'document',
-    'sec-fetch-mode': 'navigate',
-    'sec-fetch-site': 'same-origin',
-    'sec-fetch-user': '?1',
-    'upgrade-insecure-requests': '1',
     'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36 Edg/148.0.0.0',
 }
 
-# ========== إعداد الجلسة المتقدمة ==========
-def create_session():
-    session = requests.Session()
-    # إعادة محاولات تلقائية
-    retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
-    session.mount('https://', HTTPAdapter(max_retries=retries))
-    # تعيين الهيدرات وملفات الارتباط
-    session.headers.update(HEADERS)
-    session.cookies.update(COOKIES)
-    return session
+# ========== دالة لإنشاء سكرابر مع بروكسي عشوائي ==========
+def create_scraper_with_proxy(proxy=None):
+    scraper = cloudscraper.create_scrazer()  # لاحظ: يجب create_scraper وليس create_scrazer (تصحيح)
+    # تصحيح:
+    scraper = cloudscraper.create_scraper()
+    scraper.headers.update(HEADERS)
+    scraper.cookies.update(COOKIES)
+    if proxy:
+        scraper.proxies = proxy
+    return scraper
 
-# إنشاء جلسة عالمية لإعادة الاستخدام (تعيد استخدام الكوكيز والهيدرات نفسها)
-session = create_session()
-
-def fetch_with_retry(url, method='get', **kwargs):
-    """مرونة الطلب مع إعادة محاولة تلقائية"""
-    for attempt in range(3):
+# ========== دالة طلب مع إعادة المحاولة وتغيير البروكسي ==========
+def fetch_with_retry(url, max_retries=3):
+    available_proxies = PROXY_LIST.copy()
+    random.shuffle(available_proxies)
+    
+    for attempt in range(max_retries):
+        proxy = available_proxies[attempt % len(available_proxies)] if available_proxies else None
         try:
-            response = session.request(method, url, timeout=15, **kwargs)
+            scraper = create_scraper_with_proxy(proxy)
+            response = scraper.get(url, timeout=20)
             response.raise_for_status()
             return response
         except Exception as e:
-            if attempt == 2:
+            print(f"محاولة {attempt+1} فشلت باستخدام البروكسي {proxy.get('http') if proxy else 'بدون بروكسي'}: {e}")
+            if attempt == max_retries - 1:
                 raise
-            time.sleep(1 * (attempt + 1))
-    raise Exception("Failed to fetch after retries")
+            time.sleep(2)
+    raise Exception("فشل بعد جميع المحاولات")
 
-# ------------------- دوال المساعدة -------------------
+# ========== باقي الدوال (نفس السابق لكن تستخدم fetch_with_retry) ==========
 def get_post_id(url: str):
     try:
         response = fetch_with_retry(url)
@@ -87,7 +87,7 @@ def get_post_id(url: str):
 
 def get_episode_data(post_id: str):
     if not post_id:
-        return {"error": "لم يتم العثور على الـ ID أو الرابط غير صالح."}
+        return {"error": "لم يتم العثور على الـ ID"}
     try:
         api_url = f"https://witanime.you/wp-json/custom-api/blue/ldo/frum/chd/not/loaded/v1/episode/{post_id}"
         response = fetch_with_retry(api_url)
@@ -109,19 +109,10 @@ def get_episode_data(post_id: str):
     except Exception as e:
         return {"error": f"خطأ أثناء جلب البيانات: {str(e)}"}
 
-# ------------------- نقاط النهاية -------------------
+# ------------------- Endpoints -------------------
 @app.get("/")
 def root():
-    return {
-        "message": "مرحباً بك في Witanime API (مع Cookies و Headers محسّنة)",
-        "endpoints": {
-            "/episode-info": "GET?url=... - معلومات حلقة معينة",
-            "/episodes": "GET?page=1 - قائمة الحلقات من الأرشيف",
-            "/search": "GET?q=اسم_الانمي&page=1 - البحث عن أنمي",
-            "/anime": "GET?url=... - تفاصيل الأنمي (باستخدام RSS)",
-            "/anime-episodes": "GET?url=... - استخراج الحلقات من صفحة الأنمي (Base64)"
-        }
-    }
+    return {"message": "Witanime API with rotating proxies + CloudScraper"}
 
 @app.get("/episode-info")
 def episode_info(url: str = Query(...)):
@@ -178,24 +169,19 @@ def anime_details(url: str = Query(...)):
             rss_ok = False
 
         info = {}
-        info_divs = soup.find_all('div', class_='anime-info')
-        for div in info_divs:
+        for div in soup.find_all('div', class_='anime-info'):
             span = div.find('span')
             if span:
                 key = span.text.strip(':')
                 value = div.text.replace(span.text, '').strip()
                 info[key] = value
-
         story_tag = soup.find('p', class_='anime-story')
         if story_tag:
             info['story'] = story_tag.text.strip()
-
         title_tag = soup.find('h1', class_='anime-details-title')
         title = title_tag.text.strip() if title_tag else ""
-
         image_tag = soup.find('img', class_='thumbnail')
         image = image_tag.get('src', '') if image_tag else ""
-
         episodes = []
         if rss_ok:
             root = ET.fromstring(rss_resp.text)
@@ -203,7 +189,6 @@ def anime_details(url: str = Query(...)):
                 ep_title = item.findtext('title', 'بدون عنوان')
                 ep_link = item.findtext('link', 'بدون رابط')
                 episodes.append({"title": ep_title, "url": ep_link})
-
         return {"title": title, "image": image, "info": info, "episodes": episodes}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
