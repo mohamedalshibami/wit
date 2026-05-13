@@ -1,81 +1,42 @@
-# ================= Witanime API - CloudScraper + Proxies =================
-import cloudscraper
+# ================= Witanime API - ScraperAPI Version =================
+import requests
 import re
 import base64
 import urllib.parse
 import xml.etree.ElementTree as ET
-import random
 import time
 from fastapi import FastAPI, Query, HTTPException
 from bs4 import BeautifulSoup
 
-app = FastAPI(title="Witanime API", description="API مع بروكسيات متعددة و CloudScraper", version="2.0")
+app = FastAPI(title="Witanime API", description="API لاستخراج بيانات الأنمي عبر ScraperAPI", version="1.4")
 
 website = "https://witanime.you/"
+API_KEY = "bf565c4a886c08ff401e4999d76e451c"  # مفتاح ScraperAPI
+SCRAPERAPI_URL = "https://api.scraperapi.com/"
 
-# ========== البروكسيات المقدمة ==========
-PROXY_LIST = [
-    {"http": "http://213.131.85.26:1981", "https": "http://213.131.85.26:1981"},
-    {"http": "http://196.204.83.233:1976", "https": "http://196.204.83.233:1976"},
-    {"http": "http://41.33.219.140:1981", "https": "http://41.33.219.140:1981"},
-    {"http": "http://196.204.83.232:1981", "https": "http://196.204.83.232:1981"},
-    {"http": "http://196.219.64.252:80", "https": "http://196.219.64.252:80"},
-    {"http": "http://41.33.219.140:1976", "https": "http://41.33.219.140:1976"},
-]
-
-# ========== الكوكيز والهيدرات المقدمة ==========
-COOKIES = {
-    '_ga': 'GA1.1.142760803.1778638162',
-    'wordpress_test_cookie': 'WP%20Cookie%20check',
-    'cf_clearance': '7h09fSf9XPwlOR0UuwqoV8qGbYDb1g79Z0f1ElU44lY-1778646327-1.2.1.1-EuZwVqo94L7KVtTVpKOY.uBUAMcbBQp1CDHZsBG2nPaNi.ypQRPBr44AAkw4.7R9O5_oq7qT3sbfvwFaEN0pgVHaSHfwin761Do3suW98C9LBxD0qxHLPzPxAiDSDdMPrEQagNmDk7aiNzRoymG63mGaeFd6gpWVnD3ueFg0GH8CZU0Rgquu6vRADX8L7dVRbABbZxlqawQuEYWtSdFqdwYqmnkBlICeh8zk_6cxIKoU6la0zZZPKF99YLZC1m8K.7_YWrtfHXYPkVHTV9wSS.TJqPxDHr6ifq1MiEMRv6HKrbxYX.37rhayJkgKY.khoP.nuIjLWHcYII0wt57UZw',
-    '_ga_ZVB2E4FQBQ': 'GS2.1.s1778638161$o1$g1$t1778646869$j60$l0$h0',
-}
-
-HEADERS = {
-    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'accept-language': 'ar,en;q=0.9',
-    'referer': 'https://witanime.you/',
-    'sec-ch-ua': '"Chromium";v="148", "Microsoft Edge";v="148", "Not/A)Brand";v="99"',
-    'sec-ch-ua-mobile': '?1',
-    'sec-ch-ua-platform': '"Android"',
-    'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36 Edg/148.0.0.0',
-}
-
-# ========== دالة لإنشاء سكرابر مع بروكسي عشوائي ==========
-def create_scraper_with_proxy(proxy=None):
-    scraper = cloudscraper.create_scrazer()  # لاحظ: يجب create_scraper وليس create_scrazer (تصحيح)
-    # تصحيح:
-    scraper = cloudscraper.create_scraper()
-    scraper.headers.update(HEADERS)
-    scraper.cookies.update(COOKIES)
-    if proxy:
-        scraper.proxies = proxy
-    return scraper
-
-# ========== دالة طلب مع إعادة المحاولة وتغيير البروكسي ==========
-def fetch_with_retry(url, max_retries=3):
-    available_proxies = PROXY_LIST.copy()
-    random.shuffle(available_proxies)
-    
-    for attempt in range(max_retries):
-        proxy = available_proxies[attempt % len(available_proxies)] if available_proxies else None
+def scraperapi_get(target_url: str, retries: int = 3):
+    """
+    إرسال طلب عبر ScraperAPI وإعادة المحتوى (نص) مع إعادة محاولة تلقائية.
+    """
+    for attempt in range(retries):
         try:
-            scraper = create_scraper_with_proxy(proxy)
-            response = scraper.get(url, timeout=20)
+            params = {
+                'api_key': API_KEY,
+                'url': target_url,
+                # يمكن إضافة 'render' => 'true' إذا كان الموقع يستخدم JS لكن ليس مطلوباً هنا
+            }
+            response = requests.get(SCRAPERAPI_URL, params=params, timeout=30)
             response.raise_for_status()
-            return response
+            return response.text
         except Exception as e:
-            print(f"محاولة {attempt+1} فشلت باستخدام البروكسي {proxy.get('http') if proxy else 'بدون بروكسي'}: {e}")
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(2)
-    raise Exception("فشل بعد جميع المحاولات")
+            if attempt == retries - 1:
+                raise Exception(f"فشل بعد {retries} محاولات عبر ScraperAPI: {e}")
+            time.sleep(2 ** attempt)  # تأخير تصاعدي
 
-# ========== باقي الدوال (نفس السابق لكن تستخدم fetch_with_retry) ==========
+# ------------------- Helper Functions -------------------
 def get_post_id(url: str):
     try:
-        response = fetch_with_retry(url)
-        html = response.text
+        html = scraperapi_get(url)
         shortlink = BeautifulSoup(html, "html.parser").find("link", rel="shortlink")
         if shortlink and "href" in shortlink.attrs:
             match = re.search(r"p=(\d+)", shortlink["href"])
@@ -87,11 +48,14 @@ def get_post_id(url: str):
 
 def get_episode_data(post_id: str):
     if not post_id:
-        return {"error": "لم يتم العثور على الـ ID"}
+        return {"error": "لم يتم العثور على الـ ID أو الرابط غير صالح."}
     try:
         api_url = f"https://witanime.you/wp-json/custom-api/blue/ldo/frum/chd/not/loaded/v1/episode/{post_id}"
-        response = fetch_with_retry(api_url)
-        data = response.json()
+        json_text = scraperapi_get(api_url)
+        data = requests.json() if isinstance(json_text, str) else json_text  # تأكد من التحويل
+        # لكن scraperapi_get يعيد نص، نحتاج إلى تحميل JSON
+        import json
+        data = json.loads(json_text)
         meta = data.get("meta", {})
         return {
             "anime_name": data.get("taxonomy", {}).get("anime", ["غير متوفر"])[0],
@@ -109,13 +73,22 @@ def get_episode_data(post_id: str):
     except Exception as e:
         return {"error": f"خطأ أثناء جلب البيانات: {str(e)}"}
 
-# ------------------- Endpoints -------------------
+# ------------------- API Endpoints -------------------
 @app.get("/")
 def root():
-    return {"message": "Witanime API with rotating proxies + CloudScraper"}
+    return {
+        "message": "مرحباً بك في Witanime API (عبر ScraperAPI)",
+        "endpoints": {
+            "/episode-info": "GET?url=... - معلومات حلقة معينة",
+            "/episodes": "GET?page=1 - قائمة الحلقات من الأرشيف",
+            "/search": "GET?q=اسم_الانمي&page=1 - البحث عن أنمي",
+            "/anime": "GET?url=... - تفاصيل الأنمي (باستخدام RSS)",
+            "/anime-episodes": "GET?url=... - استخراج الحلقات من صفحة الأنمي (Base64)"
+        }
+    }
 
 @app.get("/episode-info")
-def episode_info(url: str = Query(...)):
+def episode_info(url: str = Query(..., description="رابط الحلقة")):
     post_id = get_post_id(url)
     if not post_id:
         raise HTTPException(status_code=404, detail="لم يتم العثور على معرف الحلقة")
@@ -125,8 +98,8 @@ def episode_info(url: str = Query(...)):
 def episodes(page: int = Query(1, ge=1)):
     try:
         page_url = f"{website}episode/" + (f"page/{page}/" if page > 1 else "")
-        response = fetch_with_retry(page_url)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        html = scraperapi_get(page_url)
+        soup = BeautifulSoup(html, 'html.parser')
         titles = soup.select('.episodes-card-title h3 a')
         images = soup.select('.anime-card-poster img')
         result = [
@@ -144,8 +117,8 @@ def search_anime(q: str = Query(...), page: int = Query(1, ge=1)):
             search_url = f"{website}?search_param=animes&s={q}"
         else:
             search_url = f"https://witanime.you/search/{q}/page/{page}/"
-        response = fetch_with_retry(search_url)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        html = scraperapi_get(search_url)
+        soup = BeautifulSoup(html, 'html.parser')
         titles = soup.select('.anime-card-details h3 a')
         images = soup.select('.anime-card-poster img')
         results = [
@@ -159,36 +132,42 @@ def search_anime(q: str = Query(...), page: int = Query(1, ge=1)):
 @app.get("/anime")
 def anime_details(url: str = Query(...)):
     try:
-        response = fetch_with_retry(url)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        html = scraperapi_get(url)
+        soup = BeautifulSoup(html, 'html.parser')
         rss_url = url.rstrip('/') + '/feed/'
         try:
-            rss_resp = fetch_with_retry(rss_url)
+            rss_text = scraperapi_get(rss_url)
             rss_ok = True
         except:
             rss_ok = False
 
         info = {}
-        for div in soup.find_all('div', class_='anime-info'):
+        info_divs = soup.find_all('div', class_='anime-info')
+        for div in info_divs:
             span = div.find('span')
             if span:
                 key = span.text.strip(':')
                 value = div.text.replace(span.text, '').strip()
                 info[key] = value
+
         story_tag = soup.find('p', class_='anime-story')
         if story_tag:
             info['story'] = story_tag.text.strip()
+
         title_tag = soup.find('h1', class_='anime-details-title')
         title = title_tag.text.strip() if title_tag else ""
+
         image_tag = soup.find('img', class_='thumbnail')
         image = image_tag.get('src', '') if image_tag else ""
+
         episodes = []
         if rss_ok:
-            root = ET.fromstring(rss_resp.text)
-            for item in root.findall('.//item'):
+            root_xml = ET.fromstring(rss_text)
+            for item in root_xml.findall('.//item'):
                 ep_title = item.findtext('title', 'بدون عنوان')
                 ep_link = item.findtext('link', 'بدون رابط')
                 episodes.append({"title": ep_title, "url": ep_link})
+
         return {"title": title, "image": image, "info": info, "episodes": episodes}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -196,15 +175,14 @@ def anime_details(url: str = Query(...)):
 @app.get("/anime-episodes")
 def anime_episodes_base64(url: str = Query(...)):
     try:
-        response = fetch_with_retry(url)
-        html = response.text
+        html = scraperapi_get(url)
         matches = re.findall(r"onclick=\"openEpisode\('([^']+)'\)\">([^<]+)</a>", html)
         episodes = []
         for encoded, title in matches:
             try:
                 decoded_url = urllib.parse.unquote(base64.b64decode(encoded).decode())
                 episodes.append({"title": title.strip(), "url": decoded_url})
-            except:
+            except Exception:
                 episodes.append({"title": title.strip(), "url": "فك التشفير فشل"})
         return {"episodes": episodes}
     except Exception as e:
