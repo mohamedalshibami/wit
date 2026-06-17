@@ -1,4 +1,4 @@
-# ================= Witanime API - ScraperAPI Version (تصحيح الخطأ) =================
+# ================= Witanime API - ScraperAPI Version (تصحيح الخطأ + تفعيل CORS) =================
 import requests
 import json
 import re
@@ -7,9 +7,19 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import time
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from bs4 import BeautifulSoup
 
 app = FastAPI(title="Witanime API", description="API لاستخراج بيانات الأنمي عبر ScraperAPI", version="1.5")
+
+# إضافة ممر الـ CORS للسماح لصفحات الـ HTML بالوصول إلى البيانات دون قيود المتصفح
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 website = "https://witanime.you/"
 API_KEY = "bf565c4a886c08ff401e4999d76e451c"  # يفضل استخدام متغير بيئة
